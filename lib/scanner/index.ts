@@ -4,6 +4,7 @@ import { checkSSL } from "./checks/ssl"
 import { checkCookies } from "./checks/cookies"
 import { checkContentAnalysis } from "./checks/content"
 import { checkDNS } from "./checks/dns"
+import { checkRouteDiscovery } from "./checks/routes"
 
 export type CheckResult = {
   category: string
@@ -28,13 +29,14 @@ export async function runScan(scanId: string, url: string): Promise<number> {
     const normalizedUrl = url.startsWith("http") ? url : `https://${url}`
 
     // Run all passive checks in parallel
-    const [headersResults, sslResults, cookiesResults, contentResults, dnsResults] =
+    const [headersResults, sslResults, cookiesResults, contentResults, dnsResults, routeResults] =
       await Promise.allSettled([
         checkSecurityHeaders(normalizedUrl),
         checkSSL(normalizedUrl),
         checkCookies(normalizedUrl),
         checkContentAnalysis(normalizedUrl),
         checkDNS(normalizedUrl),
+        checkRouteDiscovery(normalizedUrl),
       ])
 
     // Collect results from each check
@@ -43,6 +45,7 @@ export async function runScan(scanId: string, url: string): Promise<number> {
     if (cookiesResults.status === "fulfilled") findings.push(...cookiesResults.value)
     if (contentResults.status === "fulfilled") findings.push(...contentResults.value)
     if (dnsResults.status === "fulfilled") findings.push(...dnsResults.value)
+    if (routeResults.status === "fulfilled") findings.push(...routeResults.value)
 
     // Save all findings to database
     for (const finding of findings) {
