@@ -1,10 +1,11 @@
-// Route Discovery Check - integrates with the scanner system
+// Route Analysis Check - analyzes the specific URL provided by the user
 
 import type { CheckResult } from "../index"
 import { discoverRoutes, type DiscoveredRoute } from "./routes/index"
 
 /**
- * Performs public route discovery and returns findings
+ * Analyzes the specific URL that was provided by the user
+ * Reports information about that specific route only
  */
 export async function checkRouteDiscovery(url: string): Promise<CheckResult[]> {
   const results: CheckResult[] = []
@@ -14,146 +15,79 @@ export async function checkRouteDiscovery(url: string): Promise<CheckResult[]> {
       baseUrl: url,
     })
 
-    // Add summary finding
-    results.push({
-      category: "Route Discovery",
-      title: "Descoberta de Rotas Públicas",
-      description: `Foram analisadas ${discovery.totalAnalyzed} rotas, ${discovery.totalAccessible} estão acessíveis.`,
-      risk_level: "info",
-      details: {
-        totalAnalyzed: discovery.totalAnalyzed,
-        totalAccessible: discovery.totalAccessible,
-        errors: discovery.errors,
-      },
-    })
-
-    // Group routes by risk level
-    const highRiskRoutes = discovery.routes.filter(
-      (r) => r.riskLevel === "high" && r.isAccessible
-    )
-    const mediumRiskRoutes = discovery.routes.filter(
-      (r) => r.riskLevel === "medium" && r.isAccessible
-    )
-
-    // Report high risk routes
-    if (highRiskRoutes.length > 0) {
-      results.push({
-        category: "Route Discovery",
-        title: `${highRiskRoutes.length} rota(s) de alto risco detectada(s)`,
-        description: formatRouteList(highRiskRoutes),
-        risk_level: "high",
-        recommendation:
-          "Revise essas rotas para garantir que não expõem dados sensíveis ou funcionalidades administrativas sem proteção adequada.",
-        details: {
-          routes: highRiskRoutes.map(formatRouteDetail),
-        },
-      })
+    // Check if we got any result
+    if (discovery.routes.length === 0) {
+      if (discovery.errors.length > 0) {
+        results.push({
+          category: "Route Analysis",
+          title: "Erro ao analisar rota",
+          description: discovery.errors[0],
+          risk_level: "info",
+        })
+      }
+      return results
     }
 
-    // Report medium risk routes
-    if (mediumRiskRoutes.length > 0) {
-      results.push({
-        category: "Route Discovery",
-        title: `${mediumRiskRoutes.length} rota(s) de risco médio detectada(s)`,
-        description: formatRouteList(mediumRiskRoutes),
-        risk_level: "medium",
-        recommendation:
-          "Verifique se essas rotas possuem controles de acesso apropriados.",
-        details: {
-          routes: mediumRiskRoutes.map(formatRouteDetail),
-        },
-      })
-    }
+    const route = discovery.routes[0]
+    const path = extractPath(route.url)
 
-    // Report admin routes found
-    const adminRoutes = discovery.routes.filter(
-      (r) => r.type === "admin" && r.isAccessible
-    )
-    if (adminRoutes.length > 0) {
+    // Route not accessible
+    if (!route.isAccessible) {
       results.push({
-        category: "Route Discovery",
-        title: "Rotas administrativas expostas",
-        description: `Foram encontradas ${adminRoutes.length} rota(s) administrativa(s) publicamente acessíveis: ${adminRoutes.map((r) => r.url).join(", ")}`,
-        risk_level: "high",
-        recommendation:
-          "Rotas administrativas devem estar protegidas por autenticação e preferencialmente não devem ser descobertas facilmente.",
-        details: {
-          routes: adminRoutes.map(formatRouteDetail),
-        },
-      })
-    }
-
-    // Report debug routes found
-    const debugRoutes = discovery.routes.filter(
-      (r) => r.type === "debug" && r.isAccessible
-    )
-    if (debugRoutes.length > 0) {
-      results.push({
-        category: "Route Discovery",
-        title: "Rotas de debug/teste expostas",
-        description: `Foram encontradas ${debugRoutes.length} rota(s) de debug/teste publicamente acessíveis: ${debugRoutes.map((r) => r.url).join(", ")}`,
-        risk_level: "high",
-        recommendation:
-          "Rotas de debug e teste devem ser desabilitadas em produção para evitar vazamento de informações.",
-        details: {
-          routes: debugRoutes.map(formatRouteDetail),
-        },
-      })
-    }
-
-    // Report API endpoints found
-    const apiRoutes = discovery.routes.filter(
-      (r) => r.type === "api" && r.isAccessible
-    )
-    if (apiRoutes.length > 0) {
-      results.push({
-        category: "Route Discovery",
-        title: `${apiRoutes.length} endpoint(s) de API detectado(s)`,
-        description: `Endpoints de API públicos encontrados: ${apiRoutes.map((r) => r.url).join(", ")}`,
-        risk_level: "medium",
-        recommendation:
-          "Verifique se todos os endpoints de API possuem autenticação e autorização adequadas.",
-        details: {
-          routes: apiRoutes.map(formatRouteDetail),
-        },
-      })
-    }
-
-    // Report config files found
-    const configRoutes = discovery.routes.filter(
-      (r) => r.type === "config" && r.isAccessible
-    )
-    if (configRoutes.length > 0) {
-      results.push({
-        category: "Route Discovery",
-        title: "Arquivos de configuração expostos",
-        description: `Foram encontrados arquivos de configuração publicamente acessíveis: ${configRoutes.map((r) => r.url).join(", ")}`,
-        risk_level: "critical",
-        recommendation:
-          "Arquivos de configuração NUNCA devem estar acessíveis publicamente. Remova imediatamente o acesso a esses arquivos.",
-        details: {
-          routes: configRoutes.map(formatRouteDetail),
-        },
-      })
-    }
-
-    // Add errors if any
-    if (discovery.errors.length > 0) {
-      results.push({
-        category: "Route Discovery",
-        title: "Erros durante a descoberta de rotas",
-        description: `Ocorreram ${discovery.errors.length} erro(s) durante a análise: ${discovery.errors.slice(0, 3).join("; ")}`,
+        category: "Route Analysis",
+        title: `Rota inacessível: ${path}`,
+        description: `A rota ${path} retornou status ${route.status}${route.indicators.length > 0 ? `. ${route.indicators[0]}` : ""}`,
         risk_level: "info",
-        details: {
-          errors: discovery.errors,
-        },
+        details: formatRouteDetail(route),
+      })
+      return results
+    }
+
+    // Report based on route type and risk
+    if (route.riskLevel === "high") {
+      results.push({
+        category: "Route Analysis",
+        title: `Rota de alto risco: ${path}`,
+        description: getHighRiskDescription(route, path),
+        risk_level: "high",
+        recommendation: getRecommendation(route.type),
+        details: formatRouteDetail(route),
+      })
+    } else if (route.riskLevel === "medium") {
+      results.push({
+        category: "Route Analysis",
+        title: `Rota encontrada: ${path}`,
+        description: getMediumRiskDescription(route, path),
+        risk_level: "medium",
+        recommendation: getRecommendation(route.type),
+        details: formatRouteDetail(route),
+      })
+    } else {
+      results.push({
+        category: "Route Analysis",
+        title: `Rota analisada: ${path}`,
+        description: getLowRiskDescription(route, path),
+        risk_level: "info",
+        details: formatRouteDetail(route),
       })
     }
+
+    // Add specific findings based on indicators
+    if (route.indicators.length > 0) {
+      const indicatorDescription = route.indicators.join("; ")
+      results.push({
+        category: "Route Analysis",
+        title: "Indicadores detectados",
+        description: indicatorDescription,
+        risk_level: route.riskLevel === "high" ? "medium" : "info",
+      })
+    }
+
   } catch (error) {
     results.push({
-      category: "Route Discovery",
-      title: "Erro na descoberta de rotas",
-      description: `Não foi possível realizar a descoberta de rotas: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
+      category: "Route Analysis",
+      title: "Erro na análise de rota",
+      description: `Não foi possível analisar a rota: ${error instanceof Error ? error.message : "Erro desconhecido"}`,
       risk_level: "info",
     })
   }
@@ -161,19 +95,67 @@ export async function checkRouteDiscovery(url: string): Promise<CheckResult[]> {
   return results
 }
 
-function formatRouteList(routes: DiscoveredRoute[]): string {
-  return routes
-    .slice(0, 5)
-    .map((r) => `${r.url} (${r.type}, ${r.indicators.join(", ")})`)
-    .join("; ")
+function extractPath(url: string): string {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url
+  }
+}
+
+function getHighRiskDescription(route: DiscoveredRoute, path: string): string {
+  switch (route.type) {
+    case "admin":
+      return `A rota ${path} parece ser um painel administrativo acessível publicamente.`
+    case "config":
+      return `A rota ${path} expõe arquivos de configuração que podem conter dados sensíveis.`
+    case "debug":
+      return `A rota ${path} é uma rota de debug/desenvolvimento exposta em produção.`
+    default:
+      return `A rota ${path} foi classificada como alto risco (tipo: ${route.type}).`
+  }
+}
+
+function getMediumRiskDescription(route: DiscoveredRoute, path: string): string {
+  switch (route.type) {
+    case "api":
+      return `A rota ${path} é um endpoint de API. Verifique se possui autenticação adequada.`
+    case "auth":
+      return `A rota ${path} é uma página de autenticação.`
+    default:
+      return `A rota ${path} está acessível (status ${route.status}).`
+  }
+}
+
+function getLowRiskDescription(route: DiscoveredRoute, path: string): string {
+  return `A rota ${path} está acessível e retornou status ${route.status}. Tipo: ${route.type}.`
+}
+
+function getRecommendation(type: string): string {
+  switch (type) {
+    case "admin":
+      return "Proteja rotas administrativas com autenticação forte e considere restringir acesso por IP."
+    case "config":
+      return "Remova imediatamente o acesso público a arquivos de configuração."
+    case "debug":
+      return "Desabilite rotas de debug em ambiente de produção."
+    case "api":
+      return "Verifique se o endpoint possui autenticação, rate limiting e validação de entrada."
+    case "auth":
+      return "Certifique-se de usar HTTPS, proteção contra brute-force e tokens CSRF."
+    default:
+      return "Revise as permissões de acesso desta rota."
+  }
 }
 
 function formatRouteDetail(route: DiscoveredRoute) {
   return {
     url: route.url,
+    path: extractPath(route.url),
     status: route.status,
     type: route.type,
     riskLevel: route.riskLevel,
+    isAccessible: route.isAccessible,
     contentType: route.contentType,
     indicators: route.indicators,
   }

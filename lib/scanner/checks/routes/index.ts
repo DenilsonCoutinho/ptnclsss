@@ -1,5 +1,5 @@
-// Public Route Discovery Module
-// Exports the main discovery function and types
+// Route Analysis Module
+// Analyzes the specific URL provided by the user
 
 export { discoverRoutes } from "./discovery"
 export type {
@@ -9,4 +9,3 @@ export type {
   RouteType,
   RiskLevel,
 } from "./types"
-export { DEFAULT_ROUTES } from "./default-routes"

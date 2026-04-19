@@ -1,6 +1,6 @@
-// Types for the Public Route Discovery module
+// Types for the Route Analysis module
 
-export type RouteType = "page" | "api" | "admin" | "debug" | "config" | "unknown"
+export type RouteType = "page" | "api" | "admin" | "debug" | "config" | "auth" | "backup" | "sensitive" | "unknown"
 
 export type RiskLevel = "low" | "medium" | "high"
 
