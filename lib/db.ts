@@ -1,6 +1,5 @@
-import { neon } from "@neondatabase/serverless"
-
-export const sql = neon(process.env.DATABASE_URL!)
+import { prisma } from "@/lib/prisma"
+import type { Scan as PrismaScan, Finding as PrismaFinding } from "@/src/generated/prisma/models"
 
 export type Scan = {
   id: string
@@ -26,92 +25,97 @@ export type Finding = {
   created_at: string
 }
 
+// Helper to convert Prisma Scan to our Scan type
+function toScan(prismaScan: PrismaScan): Scan {
+  return {
+    id: prismaScan.id,
+    url: prismaScan.url,
+    email: prismaScan.email,
+    status: prismaScan.status as Scan["status"],
+    score: prismaScan.score,
+    started_at: prismaScan.startedAt?.toISOString() ?? null,
+    completed_at: prismaScan.completedAt?.toISOString() ?? null,
+    created_at: prismaScan.createdAt.toISOString(),
+    error_message: prismaScan.errorMessage,
+  }
+}
+
+// Helper to convert Prisma Finding to our Finding type
+function toFinding(prismaFinding: PrismaFinding): Finding {
+  return {
+    id: prismaFinding.id,
+    scan_id: prismaFinding.scanId,
+    category: prismaFinding.category,
+    title: prismaFinding.title,
+    description: prismaFinding.description,
+    risk_level: prismaFinding.riskLevel as Finding["risk_level"],
+    recommendation: prismaFinding.recommendation,
+    details: prismaFinding.details as Record<string, unknown> | null,
+    created_at: prismaFinding.createdAt.toISOString(),
+  }
+}
+
 export async function createScan(url: string, email?: string): Promise<Scan> {
-  const result = await sql`
-    INSERT INTO scans (url, email, status)
-    VALUES (${url}, ${email || null}, 'pending')
-    RETURNING *
-  `
-  return result[0] as Scan
+  const scan = await prisma.scan.create({
+    data: {
+      url,
+      email: email || null,
+      status: "pending",
+    },
+  })
+  return toScan(scan)
 }
 
 export async function getScan(id: string): Promise<Scan | null> {
-  const result = await sql`
-    SELECT * FROM scans WHERE id = ${id}
-  `
-  return (result[0] as Scan) || null
+  const scan = await prisma.scan.findUnique({
+    where: { id },
+  })
+  return scan ? toScan(scan) : null
 }
 
 export async function updateScan(
   id: string,
   data: Partial<Pick<Scan, "status" | "score" | "started_at" | "completed_at" | "error_message">>
 ): Promise<Scan | null> {
-  const updates: string[] = []
-  const values: unknown[] = []
-
-  if (data.status !== undefined) {
-    updates.push(`status = $${values.length + 1}`)
-    values.push(data.status)
-  }
-  if (data.score !== undefined) {
-    updates.push(`score = $${values.length + 1}`)
-    values.push(data.score)
-  }
-  if (data.started_at !== undefined) {
-    updates.push(`started_at = $${values.length + 1}`)
-    values.push(data.started_at)
-  }
-  if (data.completed_at !== undefined) {
-    updates.push(`completed_at = $${values.length + 1}`)
-    values.push(data.completed_at)
-  }
-  if (data.error_message !== undefined) {
-    updates.push(`error_message = $${values.length + 1}`)
-    values.push(data.error_message)
-  }
-
-  if (updates.length === 0) return getScan(id)
-
-  const result = await sql`
-    UPDATE scans 
-    SET status = ${data.status || 'pending'},
-        score = ${data.score ?? null},
-        started_at = ${data.started_at ?? null},
-        completed_at = ${data.completed_at ?? null},
-        error_message = ${data.error_message ?? null}
-    WHERE id = ${id}
-    RETURNING *
-  `
-  return (result[0] as Scan) || null
+  const scan = await prisma.scan.update({
+    where: { id },
+    data: {
+      status: data.status,
+      score: data.score,
+      startedAt: data.started_at ? new Date(data.started_at) : undefined,
+      completedAt: data.completed_at ? new Date(data.completed_at) : undefined,
+      errorMessage: data.error_message,
+    },
+  })
+  return toScan(scan)
 }
 
 export async function createFinding(finding: Omit<Finding, "id" | "created_at">): Promise<Finding> {
-  const result = await sql`
-    INSERT INTO findings (scan_id, category, title, description, risk_level, recommendation, details)
-    VALUES (
-      ${finding.scan_id}, 
-      ${finding.category}, 
-      ${finding.title}, 
-      ${finding.description}, 
-      ${finding.risk_level}, 
-      ${finding.recommendation || null}, 
-      ${finding.details ? JSON.stringify(finding.details) : null}
-    )
-    RETURNING *
-  `
-  return result[0] as Finding
+  const created = await prisma.finding.create({
+    data: {
+      scanId: finding.scan_id,
+      category: finding.category,
+      title: finding.title,
+      description: finding.description,
+      riskLevel: finding.risk_level,
+      recommendation: finding.recommendation,
+      details: finding.details ?? undefined,
+    },
+  })
+  return toFinding(created)
 }
 
 export async function getFindingsByScan(scanId: string): Promise<Finding[]> {
-  const result = await sql`
-    SELECT * FROM findings WHERE scan_id = ${scanId} ORDER BY 
-      CASE risk_level 
-        WHEN 'critical' THEN 1 
-        WHEN 'high' THEN 2 
-        WHEN 'medium' THEN 3 
-        WHEN 'low' THEN 4 
-        WHEN 'info' THEN 5 
-      END
-  `
-  return result as Finding[]
+  const riskOrder = ["critical", "high", "medium", "low", "info"]
+  
+  const findings = await prisma.finding.findMany({
+    where: { scanId },
+  })
+  
+  // Sort by risk level
+  findings.sort((a, b) => {
+    return riskOrder.indexOf(a.riskLevel) - riskOrder.indexOf(b.riskLevel)
+  })
+  
+  return findings.map(toFinding)
 }
