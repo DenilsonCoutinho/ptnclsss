@@ -1,7 +1,23 @@
 // Route classification logic
 
 import type { RouteType, RiskLevel, RouteAnalysis } from "./types"
-import { SENSITIVE_KEYWORDS } from "./default-routes"
+
+// Sensitive keywords to check for
+const SENSITIVE_KEYWORDS = [
+  "password",
+  "secret",
+  "token",
+  "api_key",
+  "apikey",
+  "private",
+  "credentials",
+  "auth",
+  "database",
+  "db_",
+  "mysql",
+  "postgres",
+  "mongodb",
+]
 
 interface ClassificationResult {
   type: RouteType
@@ -24,61 +40,79 @@ export function classifyRoute(
   const body = analysis.body || ""
 
   // Determine route type
-  let type: RouteType = "unknown"
-
-  // Check for API patterns
-  if (isApiRoute(pathLower, contentType, body)) {
-    type = "api"
-    indicators.push("API pattern")
-    riskScore += 2
-  }
+  let type: RouteType = "page"
 
   // Check for admin patterns
   if (isAdminRoute(pathLower)) {
     type = "admin"
-    indicators.push("Admin route")
-    riskScore += 2
-  }
-
-  // Check for debug/test patterns
-  if (isDebugRoute(pathLower)) {
-    type = "debug"
-    indicators.push("Debug/test route")
-    riskScore += 2
+    indicators.push("Painel administrativo detectado")
+    riskScore += 5
   }
 
   // Check for config patterns
-  if (isConfigRoute(pathLower)) {
+  else if (isConfigRoute(pathLower)) {
     type = "config"
-    indicators.push("Config/sensitive file")
-    riskScore += 3
+    indicators.push("Arquivo de configuração exposto")
+    riskScore += 6
   }
 
-  // Check for page (HTML)
-  if (type === "unknown" && isPageRoute(contentType)) {
-    type = "page"
+  // Check for debug/test patterns
+  else if (isDebugRoute(pathLower)) {
+    type = "debug"
+    indicators.push("Rota de debug/desenvolvimento")
+    riskScore += 4
   }
 
-  // Check for JSON response
-  if (contentType.includes("application/json")) {
-    indicators.push("JSON response")
-    riskScore += 3
+  // Check for backup patterns
+  else if (isBackupRoute(pathLower)) {
+    type = "backup"
+    indicators.push("Arquivo de backup detectado")
+    riskScore += 6
   }
 
-  // Check for sensitive keywords in path
-  const foundKeywords = checkSensitiveKeywords(pathLower)
-  if (foundKeywords.length > 0) {
-    indicators.push(`Contains keywords: ${foundKeywords.join(", ")}`)
+  // Check for API patterns
+  else if (isApiRoute(pathLower, contentType, body)) {
+    type = "api"
+    indicators.push("Endpoint de API")
     riskScore += 2
+  }
+
+  // Check for auth patterns
+  else if (isAuthRoute(pathLower)) {
+    type = "auth"
+    indicators.push("Rota de autenticação")
+    riskScore += 1
+  }
+
+  // Check for sensitive file extensions
+  else if (isSensitiveFile(pathLower)) {
+    type = "sensitive"
+    indicators.push("Arquivo sensível exposto")
+    riskScore += 5
+  }
+
+  // Check response content type
+  if (contentType.includes("application/json")) {
+    indicators.push("Resposta JSON")
   }
 
   // Check for sensitive keywords in body (limited check)
   if (body) {
     const bodyKeywords = checkSensitiveKeywords(body.toLowerCase())
     if (bodyKeywords.length > 0) {
-      indicators.push(`Response contains sensitive data patterns`)
-      riskScore += 2
+      indicators.push(`Dados sensíveis detectados no conteúdo`)
+      riskScore += 3
     }
+  }
+
+  // Check HTTP status
+  if (analysis.status === 200) {
+    indicators.push(`Status: ${analysis.status} OK`)
+  } else if (analysis.status >= 300 && analysis.status < 400) {
+    indicators.push(`Redirecionamento: ${analysis.status}`)
+  } else if (analysis.status >= 400) {
+    indicators.push(`Erro: ${analysis.status}`)
+    riskScore = Math.max(0, riskScore - 2)
   }
 
   // Determine risk level based on score
@@ -93,13 +127,9 @@ export function classifyRoute(
 }
 
 function isApiRoute(path: string, contentType: string, body: string): boolean {
-  // URL contains /api
   if (path.includes("/api")) return true
-  
-  // Content-Type is JSON
   if (contentType.includes("application/json")) return true
   
-  // Response looks like JSON
   const trimmedBody = body.trim()
   if (
     (trimmedBody.startsWith("{") && trimmedBody.endsWith("}")) ||
@@ -112,22 +142,94 @@ function isApiRoute(path: string, contentType: string, body: string): boolean {
 }
 
 function isAdminRoute(path: string): boolean {
-  const adminPatterns = ["/admin", "/dashboard", "/panel", "/backoffice", "/management"]
+  const adminPatterns = [
+    "/admin",
+    "/dashboard",
+    "/panel",
+    "/backoffice",
+    "/management",
+    "/cms",
+    "/wp-admin",
+    "/administrator",
+    "/cpanel",
+  ]
   return adminPatterns.some((pattern) => path.includes(pattern))
 }
 
+function isAuthRoute(path: string): boolean {
+  const authPatterns = [
+    "/login",
+    "/signin",
+    "/sign-in",
+    "/logout",
+    "/register",
+    "/signup",
+    "/sign-up",
+    "/auth",
+    "/oauth",
+    "/forgot-password",
+    "/reset-password",
+  ]
+  return authPatterns.some((pattern) => path.includes(pattern))
+}
+
 function isDebugRoute(path: string): boolean {
-  const debugPatterns = ["/debug", "/test", "/dev", "/staging", "/swagger", "/graphql-playground"]
+  const debugPatterns = [
+    "/debug",
+    "/test",
+    "/dev",
+    "/staging",
+    "/swagger",
+    "/graphql-playground",
+    "/graphiql",
+    "/phpinfo",
+    "/_profiler",
+    "/actuator",
+  ]
   return debugPatterns.some((pattern) => path.includes(pattern))
 }
 
 function isConfigRoute(path: string): boolean {
-  const configPatterns = [".env", ".git", "config", "backup", ".bak", ".sql", ".log"]
+  const configPatterns = [
+    ".env",
+    ".git",
+    "/config",
+    "/.config",
+    "/settings",
+    ".htaccess",
+    "web.config",
+    ".aws",
+    ".docker",
+  ]
   return configPatterns.some((pattern) => path.includes(pattern))
 }
 
-function isPageRoute(contentType: string): boolean {
-  return contentType.includes("text/html")
+function isBackupRoute(path: string): boolean {
+  const backupPatterns = [
+    ".bak",
+    ".backup",
+    ".sql",
+    ".dump",
+    ".tar",
+    ".zip",
+    ".old",
+    "/backup",
+  ]
+  return backupPatterns.some((pattern) => path.includes(pattern))
+}
+
+function isSensitiveFile(path: string): boolean {
+  const sensitivePatterns = [
+    ".log",
+    ".key",
+    ".pem",
+    ".crt",
+    "id_rsa",
+    ".ssh",
+    "credentials",
+    "secrets",
+  ]
+  return sensitivePatterns.some((pattern) => path.includes(pattern))
 }
 
 function checkSensitiveKeywords(text: string): string[] {
@@ -135,7 +237,7 @@ function checkSensitiveKeywords(text: string): string[] {
 }
 
 function calculateRiskLevel(score: number): RiskLevel {
-  if (score >= 6) return "high"
-  if (score >= 3) return "medium"
+  if (score >= 5) return "high"
+  if (score >= 2) return "medium"
   return "low"
 }

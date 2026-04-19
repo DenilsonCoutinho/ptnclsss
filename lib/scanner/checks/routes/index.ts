@@ -1,5 +1,5 @@
-// Passive Route Discovery Module
-// Extracts and analyzes routes found in page content
+// Route Analysis Module
+// Analyzes the specific URL provided by the user
 
 export { discoverRoutes } from "./discovery"
 export type {
