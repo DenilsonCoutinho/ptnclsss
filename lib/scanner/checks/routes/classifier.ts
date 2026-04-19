@@ -129,7 +129,7 @@ export function classifyRoute(
 function isApiRoute(path: string, contentType: string, body: string): boolean {
   if (path.includes("/api")) return true
   if (contentType.includes("application/json")) return true
-  
+
   const trimmedBody = body.trim()
   if (
     (trimmedBody.startsWith("{") && trimmedBody.endsWith("}")) ||
@@ -137,7 +137,7 @@ function isApiRoute(path: string, contentType: string, body: string): boolean {
   ) {
     return true
   }
-  
+
   return false
 }
 
